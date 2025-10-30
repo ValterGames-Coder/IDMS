@@ -7,6 +7,7 @@ import ReactFlow, {
   useEdgesState,
   addEdge,
   ReactFlowProvider,
+  MarkerType,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { useMutation } from 'react-query'
@@ -15,7 +16,7 @@ import { Lock, Save, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ShapeNode from './nodes/ShapeNode'
 
-const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser }) => {
+const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionType = 'sequence-flow' }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [isSaving, setIsSaving] = useState(false)
@@ -26,6 +27,90 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser }) => {
       shape: ShapeNode,
     }),
     []
+  )
+
+  const getEdgeConfig = useCallback((flowType) => {
+    switch (flowType) {
+      case 'default-flow':
+        return {
+          style: { stroke: '#1f2937', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#1f2937' },
+          label: 'default',
+          labelBgPadding: [8, 4],
+          labelBgBorderRadius: 4,
+          labelBgStyle: { fill: '#f8fafc', color: '#1f2937' },
+        }
+      case 'conditional-flow':
+        return {
+          style: { stroke: '#2563eb', strokeWidth: 2, strokeDasharray: '6 4' },
+          markerStart: { type: MarkerType.Diamond, color: '#2563eb' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#2563eb' },
+          label: 'condition',
+          labelBgPadding: [8, 4],
+          labelBgBorderRadius: 4,
+          labelBgStyle: { fill: '#1d4ed8', color: '#ffffff' },
+        }
+      case 'message-flow':
+        return {
+          style: { stroke: '#0ea5e9', strokeWidth: 2, strokeDasharray: '8 4' },
+          markerStart: { type: MarkerType.Circle, color: '#0ea5e9' },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
+          animated: true,
+        }
+      case 'association':
+        return {
+          style: { stroke: '#6b7280', strokeWidth: 1.5, strokeDasharray: '4 4' },
+          type: 'straight',
+        }
+      case 'data-association':
+        return {
+          style: { stroke: '#047857', strokeWidth: 1.5, strokeDasharray: '4 4' },
+          type: 'straight',
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#047857' },
+        }
+      case 'compensation-flow':
+        return {
+          style: { stroke: '#9333ea', strokeWidth: 2, strokeDasharray: '3 3' },
+          markerEnd: { type: MarkerType.Arrow, color: '#9333ea' },
+        }
+      case 'sequence-flow':
+      default:
+        return {
+          style: { stroke: '#111827', strokeWidth: 2 },
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#111827' },
+        }
+    }
+  }, [])
+
+  const applyEdgeVisuals = useCallback(
+    (edge) => {
+      const flowType = edge?.data?.flowType || 'sequence-flow'
+      const config = getEdgeConfig(flowType)
+      const mergedData = {
+        ...(edge.data || {}),
+        flowType,
+      }
+
+      const mergedEdge = {
+        ...edge,
+        data: mergedData,
+        style: { ...(edge.style || {}), ...(config.style || {}) },
+        markerStart: config.markerStart || edge.markerStart,
+        markerEnd: config.markerEnd || edge.markerEnd,
+        type: config.type || edge.type,
+        animated: typeof config.animated === 'boolean' ? config.animated : edge.animated,
+      }
+
+      if (config.label && !edge.label) {
+        mergedEdge.label = config.label
+        mergedEdge.labelBgPadding = config.labelBgPadding
+        mergedEdge.labelBgBorderRadius = config.labelBgBorderRadius
+        mergedEdge.labelBgStyle = config.labelBgStyle
+      }
+
+      return mergedEdge
+    },
+    [getEdgeConfig]
   )
 
   // Update diagram mutation
@@ -49,7 +134,8 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser }) => {
       try {
         const content = JSON.parse(diagram.content)
         setNodes(content.nodes || [])
-        setEdges(content.edges || [])
+        const enrichedEdges = (content.edges || []).map((edge) => applyEdgeVisuals(edge))
+        setEdges(enrichedEdges)
       } catch (error) {
         console.error('Error parsing diagram content:', error)
         setNodes([])
@@ -59,7 +145,7 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser }) => {
       setNodes([])
       setEdges([])
     }
-  }, [diagram])
+  }, [diagram, applyEdgeVisuals, setEdges])
 
   // Auto-save functionality
   useEffect(() => {
@@ -73,8 +159,58 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser }) => {
   }, [nodes, edges, diagram])
 
   const onConnect = useCallback(
-    (params) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
+    (params) => {
+      if (isLocked) return
+
+      setEdges((eds) => {
+        const config = getEdgeConfig(connectionType)
+        const mergedParams = {
+          ...params,
+          ...config,
+          data: {
+            ...(params.data || {}),
+            flowType: connectionType,
+          },
+        }
+
+        const updated = addEdge(mergedParams, eds)
+        return updated.map((edge) => applyEdgeVisuals(edge))
+      })
+    },
+    [applyEdgeVisuals, connectionType, getEdgeConfig, isLocked]
+  )
+
+  const handleNodeDoubleClick = useCallback(
+    (event, node) => {
+      event.preventDefault()
+      if (isLocked) return
+
+      const currentLabel = node?.data?.label ?? ''
+      const newLabel = window.prompt('Введите новое название элемента', currentLabel)
+      if (newLabel === null) {
+        return
+      }
+
+      const trimmedLabel = newLabel.trim()
+      if (!trimmedLabel || trimmedLabel === currentLabel) {
+        return
+      }
+
+      setNodes((existingNodes) =>
+        existingNodes.map((existingNode) =>
+          existingNode.id === node.id
+            ? {
+                ...existingNode,
+                data: {
+                  ...existingNode.data,
+                  label: trimmedLabel,
+                },
+              }
+            : existingNode
+        )
+      )
+    },
+    [isLocked, setNodes]
   )
 
   const handleSave = useCallback(() => {
@@ -231,6 +367,7 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser }) => {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeDoubleClick={handleNodeDoubleClick}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onInit={handleInit}

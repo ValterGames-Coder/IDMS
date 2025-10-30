@@ -18,6 +18,7 @@ const ProjectPage = () => {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newDiagramName, setNewDiagramName] = useState('')
   const [diagramLock, setDiagramLock] = useState(null)
+  const [connectionType, setConnectionType] = useState('sequence-flow')
 
   // Fetch project data
   const { data: project, isLoading: projectLoading } = useQuery(
@@ -94,6 +95,12 @@ const ProjectPage = () => {
         .catch(() => setDiagramLock(null))
     }
   }, [selectedDiagram])
+
+  useEffect(() => {
+    if (selectedDiagram?.diagram_type !== 'bpmn') {
+      setConnectionType('sequence-flow')
+    }
+  }, [selectedDiagram?.diagram_type])
 
   const handleCreateDiagram = () => {
     if (!newDiagramName.trim()) {
@@ -209,6 +216,7 @@ const ProjectPage = () => {
               diagramType={selectedDiagram.diagram_type}
               isLocked={!!diagramLock}
               lockUser={diagramLock?.user?.username}
+              connectionType={connectionType}
             />
           ) : (
             <div className="flex-1 flex items-center justify-center bg-gray-50">
@@ -229,6 +237,8 @@ const ProjectPage = () => {
         <div className="w-80 bg-white border-l flex-shrink-0 overflow-hidden">
           <DiagramPalette
             diagramType={selectedDiagram?.diagram_type || 'bpmn'}
+            selectedConnectionType={connectionType}
+            onConnectionTypeChange={setConnectionType}
           />
         </div>
       </div>
