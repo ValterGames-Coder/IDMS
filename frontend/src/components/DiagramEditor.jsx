@@ -8,6 +8,7 @@ import ReactFlow, {
   addEdge,
   ReactFlowProvider,
   MarkerType,
+  ConnectionMode,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { useMutation } from 'react-query'
@@ -15,6 +16,50 @@ import { diagramsAPI } from '../api'
 import { Lock, Save, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ShapeNode from './nodes/ShapeNode'
+
+const CONTAINER_SHAPES = new Set(['lane', 'pool'])
+
+const isContainerShape = (shape) => CONTAINER_SHAPES.has(shape)
+
+const isContainerNode = (node) => isContainerShape(node?.data?.shape)
+
+const getNodeSizeFromNode = (node) => ({
+  width: node?.width ?? node?.data?.width ?? 0,
+  height: node?.height ?? node?.data?.height ?? 0,
+})
+
+const getNodeSizeFromData = (data = {}) => ({
+  width: data.width ?? 160,
+  height: data.height ?? 80,
+})
+
+const getNodeBounds = (node) => {
+  const position = node?.positionAbsolute ?? node?.position ?? { x: 0, y: 0 }
+  const { width, height } = getNodeSizeFromNode(node)
+  return {
+    x: position.x,
+    y: position.y,
+    width,
+    height,
+  }
+}
+
+const pointInsideBounds = (point, bounds, padding = 0) =>
+  point.x >= bounds.x + padding &&
+  point.x <= bounds.x + bounds.width - padding &&
+  point.y >= bounds.y + padding &&
+  point.y <= bounds.y + bounds.height - padding
+
+const canContainerAcceptShape = (containerShape, childShape) => {
+  if (!containerShape) return false
+  if (containerShape === 'pool') {
+    return childShape !== 'pool'
+  }
+  if (containerShape === 'lane') {
+    return childShape !== 'pool' && childShape !== 'lane'
+  }
+  return false
+}
 
 const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionType = 'sequence-flow' }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
@@ -133,7 +178,18 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
     if (diagram?.content) {
       try {
         const content = JSON.parse(diagram.content)
-        setNodes(content.nodes || [])
+        const normalisedNodes = (content.nodes || []).map((node) =>
+          isContainerShape(node?.data?.shape)
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  isContainer: true,
+                },
+              }
+            : node
+        )
+        setNodes(normalisedNodes)
         const enrichedEdges = (content.edges || []).map((edge) => applyEdgeVisuals(edge))
         setEdges(enrichedEdges)
       } catch (error) {
@@ -263,13 +319,61 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
       const label = nodeConfig.label || parsedData.name || 'Element'
       const nodeType = nodeConfig.type || 'shape'
 
+      const nodeId = `${parsedData.id || 'node'}-${Date.now()}`
+      const nodeShape = nodeConfig.shape
+      const nodeSize = getNodeSizeFromData(nodeConfig)
+      const absoluteBounds = {
+        x: position.x,
+        y: position.y,
+        width: nodeSize.width,
+        height: nodeSize.height,
+      }
+
+      const containers = reactFlowInstance
+        ? reactFlowInstance
+            .getNodes()
+            .filter((candidate) => isContainerNode(candidate))
+            .map((candidate) => ({
+              id: candidate.id,
+              shape: candidate.data?.shape,
+              bounds: getNodeBounds(candidate),
+            }))
+            .filter((info) => info.bounds.width > 0 && info.bounds.height > 0)
+            .sort(
+              (a, b) =>
+                a.bounds.width * a.bounds.height - b.bounds.width * b.bounds.height
+            )
+        : []
+
+      const targetContainer = containers.find(
+        (container) =>
+          canContainerAcceptShape(container.shape, nodeShape) &&
+          pointInsideBounds(
+            {
+              x: absoluteBounds.x + absoluteBounds.width / 2,
+              y: absoluteBounds.y + absoluteBounds.height / 2,
+            },
+            container.bounds,
+            8
+          )
+      )
+
       const newNode = {
-        id: `${parsedData.id || 'node'}-${Date.now()}`,
+        id: nodeId,
         type: nodeType,
-        position,
+        position: targetContainer
+          ? {
+              x: absoluteBounds.x - targetContainer.bounds.x,
+              y: absoluteBounds.y - targetContainer.bounds.y,
+            }
+          : position,
+        parentNode: targetContainer?.id,
+        extent: targetContainer ? 'parent' : undefined,
         data: {
           ...nodeConfig,
           label,
+          parentContainerId: targetContainer?.id,
+          isContainer: isContainerShape(nodeShape) || nodeConfig.isContainer || false,
         },
       }
 
@@ -286,9 +390,158 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
     [isLocked]
   )
 
+  const handleNodeDragStop = useCallback(
+    (event, node) => {
+      if (isLocked || !reactFlowInstance) {
+        return
+      }
+
+      const absolutePosition = node.positionAbsolute ?? node.position ?? { x: 0, y: 0 }
+      const nodeSize = {
+        width: node.width ?? node.data?.width ?? 0,
+        height: node.height ?? node.data?.height ?? 0,
+      }
+
+      const containers = reactFlowInstance
+        .getNodes()
+        .filter((candidate) => isContainerNode(candidate) && candidate.id !== node.id)
+        .map((candidate) => ({
+          id: candidate.id,
+          shape: candidate.data?.shape,
+          bounds: getNodeBounds(candidate),
+        }))
+        .filter((info) => info.bounds.width > 0 && info.bounds.height > 0)
+        .sort(
+          (a, b) => a.bounds.width * a.bounds.height - b.bounds.width * b.bounds.height
+        )
+
+      const targetContainer = containers.find((container) =>
+        canContainerAcceptShape(container.shape, node.data?.shape) &&
+        pointInsideBounds(
+          {
+            x: absolutePosition.x + nodeSize.width / 2,
+            y: absolutePosition.y + nodeSize.height / 2,
+          },
+          container.bounds,
+          8
+        )
+      )
+
+      const containerBoundsById = Object.fromEntries(
+        containers.map((container) => [container.id, container.bounds])
+      )
+
+      setNodes((currentNodes) =>
+        currentNodes.map((currentNode) => {
+          if (currentNode.id !== node.id) {
+            return currentNode
+          }
+
+          const updatedNode = {
+            ...currentNode,
+            position: node.position,
+            positionAbsolute: node.positionAbsolute,
+          }
+
+          if (targetContainer) {
+            const bounds = containerBoundsById[targetContainer.id]
+            updatedNode.parentNode = targetContainer.id
+            updatedNode.extent = 'parent'
+            updatedNode.position = {
+              x: absolutePosition.x - bounds.x,
+              y: absolutePosition.y - bounds.y,
+            }
+            updatedNode.data = {
+              ...updatedNode.data,
+              parentContainerId: targetContainer.id,
+            }
+          } else if (currentNode.parentNode) {
+            updatedNode.parentNode = undefined
+            updatedNode.extent = undefined
+            updatedNode.position = {
+              x: absolutePosition.x,
+              y: absolutePosition.y,
+            }
+            updatedNode.data = {
+              ...updatedNode.data,
+              parentContainerId: undefined,
+            }
+          }
+
+          return updatedNode
+        })
+      )
+    },
+    [isLocked, reactFlowInstance, setNodes]
+  )
+
+  const handleEdgeDoubleClick = useCallback(
+    (event, edge) => {
+      event.preventDefault()
+      event.stopPropagation()
+
+      if (isLocked) return
+
+      setEdges((currentEdges) => currentEdges.filter((existingEdge) => existingEdge.id !== edge.id))
+      toast.success('Connection removed')
+    },
+    [isLocked, setEdges]
+  )
+
   const handleInit = useCallback((instance) => {
     setReactFlowInstance(instance)
   }, [])
+
+  useEffect(() => {
+    const keydownHandler = (event) => {
+      if (isLocked) return
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return
+
+      const target = event.target
+      const tagName = target?.tagName
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target?.isContentEditable) {
+        return
+      }
+
+      event.preventDefault()
+
+      setNodes((currentNodes) => {
+        const nodesToRemove = new Set(
+          currentNodes.filter((node) => node.selected).map((node) => node.id)
+        )
+
+        if (nodesToRemove.size === 0) {
+          setEdges((currentEdges) => currentEdges.filter((edge) => !edge.selected))
+          return currentNodes
+        }
+
+        let changed = true
+        while (changed) {
+          changed = false
+          currentNodes.forEach((node) => {
+            if (!nodesToRemove.has(node.id) && node.parentNode && nodesToRemove.has(node.parentNode)) {
+              nodesToRemove.add(node.id)
+              changed = true
+            }
+          })
+        }
+
+        setEdges((currentEdges) =>
+          currentEdges.filter(
+            (edge) =>
+              !edge.selected &&
+              !nodesToRemove.has(edge.source) &&
+              !nodesToRemove.has(edge.target)
+          )
+        )
+
+        return currentNodes.filter((node) => !nodesToRemove.has(node.id))
+      })
+    }
+
+    window.addEventListener('keydown', keydownHandler)
+    return () => window.removeEventListener('keydown', keydownHandler)
+  }, [isLocked, setNodes, setEdges])
 
   const getDiagramTitle = () => {
     switch (diagramType) {
@@ -368,11 +621,15 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeDoubleClick={handleNodeDoubleClick}
+            onNodeDragStop={handleNodeDragStop}
+            onEdgeDoubleClick={handleEdgeDoubleClick}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onInit={handleInit}
             nodeTypes={nodeTypes}
             fitView
+            connectionMode={ConnectionMode.Loose}
+            connectionRadius={80}
             attributionPosition="bottom-left"
           >
             <Controls />

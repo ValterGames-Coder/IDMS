@@ -25,7 +25,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         }}
       >
         <App />
-        <Toaster position="top-right" />
+        <Toaster
+          position="top-center"
+          containerStyle={{ top: 72 }}
+        />
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

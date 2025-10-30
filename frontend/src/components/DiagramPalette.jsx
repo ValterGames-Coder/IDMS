@@ -107,6 +107,8 @@ const SWIMLANES = [
       header: 'Participant',
       headerPosition: 'left',
       headerBackground: '#e2e8f0',
+      isContainer: true,
+      containerShape: 'pool',
     },
   },
   {
@@ -123,6 +125,8 @@ const SWIMLANES = [
       header: 'Lane',
       headerPosition: 'top',
       headerBackground: '#e5e7eb',
+      isContainer: true,
+      containerShape: 'lane',
     },
   },
 ]

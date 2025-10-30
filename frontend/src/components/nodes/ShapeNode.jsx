@@ -512,12 +512,12 @@ const ShapeNode = ({ data = {} }) => {
 
   const getHandleStyle = (position, type, hasBoth) => {
     const baseStyle = {
-      width: 12,
-      height: 12,
+      width: 28,
+      height: 28,
       borderRadius: '9999px',
-      border: `2px solid ${borderColor}`,
-      background: '#ffffff',
-      boxShadow: '0 0 0 2px rgba(15, 23, 42, 0.08)',
+      border: 'none',
+      background: 'transparent',
+      opacity: 0,
       pointerEvents: 'auto',
     }
 
