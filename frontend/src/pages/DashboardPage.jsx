@@ -98,8 +98,11 @@ const DashboardPage = () => {
   if (isLoading) {
     return (
       <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <div className="flex items-center justify-center h-screen">
+          <div className="flex flex-col items-center space-y-3">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-600"></div>
+            <span className="text-gray-600 font-medium">Loading projects...</span>
+          </div>
         </div>
       </Layout>
     )
@@ -155,14 +158,20 @@ const DashboardPage = () => {
                         <button
                           onClick={() => handleEdit(project)}
                           className="text-gray-400 hover:text-gray-600"
+                          disabled={deleteProjectMutation.isLoading}
                         >
                           <Edit className="h-4 w-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(project.id)}
                           className="text-gray-400 hover:text-red-600"
+                          disabled={deleteProjectMutation.isLoading}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {deleteProjectMutation.isLoading ? (
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
                         </button>
                       </div>
                     </div>

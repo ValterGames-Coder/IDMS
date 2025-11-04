@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useAuth } from '../hooks/useAuth.jsx'
 import { Eye, EyeOff, LogIn } from 'lucide-react'
@@ -10,6 +10,7 @@ const LoginPage = () => {
   const [isLoading, setIsLoading] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   
   const {
     register,
@@ -24,7 +25,9 @@ const LoginPage = () => {
     
     if (result.success) {
       toast.success('Login successful!')
-      navigate('/dashboard')
+      // Redirect to the page they tried to access, or dashboard
+      const from = location.state?.from || '/dashboard'
+      navigate(from)
     } else {
       toast.error(result.error)
     }

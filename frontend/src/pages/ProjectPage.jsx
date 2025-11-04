@@ -7,7 +7,7 @@ import DiagramEditor from '../components/DiagramEditor'
 import DiagramTree from '../components/DiagramTree'
 import DiagramPalette from '../components/DiagramPalette'
 import { useAuth } from '../hooks/useAuth'
-import { ArrowLeft, Plus, FileText } from 'lucide-react'
+import { ArrowLeft, Plus, FileText, Share2, Copy, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const ProjectPage = () => {
@@ -20,6 +20,8 @@ const ProjectPage = () => {
   const [newDiagramName, setNewDiagramName] = useState('')
   const [diagramLock, setDiagramLock] = useState(null)
   const [connectionType, setConnectionType] = useState('sequence-flow')
+  const [showInviteModal, setShowInviteModal] = useState(false)
+  const [inviteLink, setInviteLink] = useState('')
   const { user } = useAuth()
   const heldLockRef = useRef(null)
 
@@ -60,6 +62,22 @@ const ProjectPage = () => {
         }
         
         toast.error(errorMessage)
+      },
+    }
+  )
+
+  // Create invite mutation
+  const createInviteMutation = useMutation(
+    () => projectsAPI.createInvite(projectId, 24),
+    {
+      onSuccess: (invite) => {
+        const link = `${window.location.origin}/invite/${invite.token}`
+        setInviteLink(link)
+        setShowInviteModal(true)
+        toast.success('Invite link created!')
+      },
+      onError: (error) => {
+        toast.error(error.response?.data?.detail || 'Failed to create invite link')
       },
     }
   )
@@ -106,23 +124,10 @@ const ProjectPage = () => {
         if (cancelled) return
 
         heldLockRef.current = null
-
-        if (error.response?.status === 409) {
-          try {
-            const existingLock = await diagramsAPI.getDiagramLock(diagramId)
-            if (!cancelled) {
-              setDiagramLock(existingLock)
-            }
-          } catch (fetchError) {
-            console.error('Failed to fetch existing diagram lock', fetchError)
-            if (!cancelled) {
-              setDiagramLock(null)
-            }
-          }
-
-          toast.error('Diagram is already locked by another user')
-        } else {
-          toast.error('Failed to lock diagram')
+        console.error('Failed to lock diagram', error)
+        
+        // Don't show error toast, just set lock to null
+        if (!cancelled) {
           setDiagramLock(null)
         }
       }
@@ -158,6 +163,15 @@ const ProjectPage = () => {
     })
   }
 
+  const handleCreateInvite = () => {
+    createInviteMutation.mutate()
+  }
+
+  const handleCopyInviteLink = () => {
+    navigator.clipboard.writeText(inviteLink)
+    toast.success('Invite link copied to clipboard!')
+  }
+
   const lockedByCurrentUser = Boolean(
     diagramLock && user && diagramLock.user?.id === user.id
   )
@@ -172,11 +186,14 @@ const ProjectPage = () => {
 
   if (projectLoading || diagramsLoading) {
     return (
-      <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      <div className="h-full flex items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center space-y-3">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary-600"></div>
+          <span className="text-gray-600 font-medium">
+            {projectLoading ? 'Loading project...' : 'Loading diagrams...'}
+          </span>
         </div>
-      </Layout>
+      </div>
     )
   }
 
@@ -209,6 +226,14 @@ const ProjectPage = () => {
               Locked by {lockedByCurrentUser ? 'you' : diagramLock.user?.username}
             </span>
           )}
+          <button
+            onClick={handleCreateInvite}
+            disabled={createInviteMutation.isLoading}
+            className="btn btn-secondary btn-sm"
+          >
+            <Share2 className="h-4 w-4 mr-1" />
+            Share
+          </button>
           <button
             onClick={() => setShowCreateModal(true)}
             className="btn btn-primary btn-sm"
@@ -325,6 +350,48 @@ const ProjectPage = () => {
                     {createDiagramMutation.isLoading ? 'Creating...' : 'Create'}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50">
+          <div className="p-5 border w-[500px] shadow-lg rounded-md bg-white">
+            <div className="flex justify-between items-start mb-4">
+              <h3 className="text-lg font-medium text-gray-900">
+                Share Project
+              </h3>
+              <button
+                onClick={() => setShowInviteModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                Share this link with others to invite them to collaborate on this project.
+                The link will expire in 24 hours.
+              </p>
+              
+              <div className="flex items-center space-x-2">
+                <input
+                  type="text"
+                  value={inviteLink}
+                  readOnly
+                  className="flex-1 input bg-gray-50"
+                />
+                <button
+                  onClick={handleCopyInviteLink}
+                  className="btn btn-primary"
+                >
+                  <Copy className="h-4 w-4 mr-1" />
+                  Copy
+                </button>
               </div>
             </div>
           </div>

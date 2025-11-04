@@ -108,3 +108,40 @@
     @apply p-6 pt-0;
   }
 }
+
+/* ReactFlow Handle Styles - для визуальной обратной связи при подключении */
+.react-flow__handle {
+  transition: all 0.2s ease;
+}
+
+/* Показываем handles при наведении на узел */
+.react-flow__node:hover .react-flow__handle {
+  opacity: 0.15 !important;
+  background: #3b82f6 !important;
+}
+
+/* Показываем handles при создании соединения */
+.react-flow__node.connecting .react-flow__handle,
+.react-flow__handle.connecting {
+  opacity: 0.3 !important;
+  background: #3b82f6 !important;
+}
+
+/* Подсветка для валидного handle при подключении */
+.react-flow__handle.valid {
+  opacity: 0.6 !important;
+  background: #10b981 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+}
+
+/* Подсветка для невалидного handle */
+.react-flow__handle.invalid {
+  opacity: 0.6 !important;
+  background: #ef4444 !important;
+}
+
+/* Подсветка при выделении узла */
+.react-flow__node.selected .react-flow__handle {
+  opacity: 0.2 !important;
+  background: #6366f1 !important;
+}

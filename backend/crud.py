@@ -1,9 +1,10 @@
 from sqlalchemy.orm import Session
-from models import User, Project, Diagram, DiagramElement, DiagramLock
+from models import User, Project, Diagram, DiagramElement, DiagramLock, ProjectInvite, project_members
 from schemas import UserCreate, ProjectCreate, DiagramCreate
 from auth import get_password_hash
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+import secrets
 
 # User CRUD operations
 def get_user(db: Session, user_id: int):
@@ -170,6 +171,85 @@ def unlock_all_user_locks(db: Session, user_id: int):
     ).update({"is_active": False})
     db.commit()
 
+# Project Invite CRUD operations
+def create_project_invite(db: Session, project_id: int, created_by: int, expires_in_hours: int = 24):
+    """Create a new project invite with a unique token."""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+    
+    db_invite = ProjectInvite(
+        token=token,
+        project_id=project_id,
+        created_by=created_by,
+        expires_at=expires_at,
+        is_active=True
+    )
+    db.add(db_invite)
+    db.commit()
+    db.refresh(db_invite)
+    return db_invite
 
+def get_invite_by_token(db: Session, token: str):
+    """Get invite by token."""
+    return db.query(ProjectInvite).filter(ProjectInvite.token == token).first()
 
+def get_active_project_invites(db: Session, project_id: int):
+    """Get all active invites for a project."""
+    return db.query(ProjectInvite).filter(
+        ProjectInvite.project_id == project_id,
+        ProjectInvite.is_active == True,
+        ProjectInvite.expires_at > datetime.utcnow()
+    ).all()
 
+def deactivate_invite(db: Session, invite_id: int):
+    """Deactivate an invite."""
+    db.query(ProjectInvite).filter(ProjectInvite.id == invite_id).update({"is_active": False})
+    db.commit()
+
+def add_project_member(db: Session, project_id: int, user_id: int):
+    """Add a user as a member of a project."""
+    # Check if already a member
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user not in project.members:
+            project.members.append(user)
+            db.commit()
+    return project
+
+def remove_project_member(db: Session, project_id: int, user_id: int):
+    """Remove a user from project members."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user and user in project.members:
+            project.members.remove(user)
+            db.commit()
+    return project
+
+def is_project_member(db: Session, project_id: int, user_id: int):
+    """Check if a user is a member of a project."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return False
+    # Owner is always a member
+    if project.owner_id == user_id:
+        return True
+    # Check if user is in members list
+    user = db.query(User).filter(User.id == user_id).first()
+    return user in project.members if user else False
+
+def get_user_accessible_projects(db: Session, user_id: int, skip: int = 0, limit: int = 100):
+    """Get all projects accessible by a user (owned or member of)."""
+    # Get owned projects
+    owned_projects = db.query(Project).filter(Project.owner_id == user_id).all()
+    
+    # Get projects where user is a member
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        member_projects = user.shared_projects
+        # Combine and remove duplicates
+        all_projects = list(set(owned_projects + member_projects))
+        return all_projects[skip:skip+limit]
+    
+    return owned_projects[skip:skip+limit]

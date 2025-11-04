@@ -676,52 +676,48 @@ const ShapeNode = ({ data = {} }) => {
   }
 
   const getHandleStyle = (position, type, hasBoth) => {
+    const isCircular = ['circle', 'relationship', 'diamond'].includes(shape)
+    
     const baseStyle = {
-      width: 28,
-      height: 28,
-      borderRadius: '9999px',
       border: 'none',
       background: 'transparent',
       opacity: 0,
       pointerEvents: 'auto',
+      borderRadius: isCircular ? '50%' : 0,
     }
+
+    // Для круглых и ромбовидных форм используем точечные handles
+    // Для прямоугольных - handles покрывают всю сторону
+    const handleSize = isCircular ? '15px' : '10px'
 
     switch (position) {
       case Position.Top:
         baseStyle.top = 0
-        baseStyle.transform = 'translate(-50%, -50%)'
-        baseStyle.left = hasBoth
-          ? type === 'target'
-            ? '35%'
-            : '65%'
-          : '50%'
+        baseStyle.left = isCircular ? '50%' : 0
+        baseStyle.width = isCircular ? handleSize : '100%'
+        baseStyle.height = handleSize
+        baseStyle.transform = isCircular ? 'translate(-50%, -50%)' : 'translateY(-50%)'
         break
       case Position.Bottom:
         baseStyle.bottom = 0
-        baseStyle.transform = 'translate(-50%, 50%)'
-        baseStyle.left = hasBoth
-          ? type === 'target'
-            ? '35%'
-            : '65%'
-          : '50%'
+        baseStyle.left = isCircular ? '50%' : 0
+        baseStyle.width = isCircular ? handleSize : '100%'
+        baseStyle.height = handleSize
+        baseStyle.transform = isCircular ? 'translate(-50%, 50%)' : 'translateY(50%)'
         break
       case Position.Left:
         baseStyle.left = 0
-        baseStyle.transform = 'translate(-50%, -50%)'
-        baseStyle.top = hasBoth
-          ? type === 'target'
-            ? '35%'
-            : '65%'
-          : '50%'
+        baseStyle.top = isCircular ? '50%' : 0
+        baseStyle.width = handleSize
+        baseStyle.height = isCircular ? handleSize : '100%'
+        baseStyle.transform = isCircular ? 'translate(-50%, -50%)' : 'translateX(-50%)'
         break
       case Position.Right:
         baseStyle.right = 0
-        baseStyle.transform = 'translate(50%, -50%)'
-        baseStyle.top = hasBoth
-          ? type === 'target'
-            ? '35%'
-            : '65%'
-          : '50%'
+        baseStyle.top = isCircular ? '50%' : 0
+        baseStyle.width = handleSize
+        baseStyle.height = isCircular ? handleSize : '100%'
+        baseStyle.transform = isCircular ? 'translate(50%, -50%)' : 'translateX(50%)'
         break
       default:
         break
@@ -735,17 +731,18 @@ const ShapeNode = ({ data = {} }) => {
   return (
     <div className="relative">
       {hasHandles &&
-        handleDefinitions.map((handle) => {
+        handleDefinitions.map((handle, index) => {
           const handleId = `${handle.type}-${handle.position}`
           const style = getHandleStyle(handle.position, handle.type, positionsWithBoth.has(handle.position))
 
           return (
             <Handle
-              key={handleId}
+              key={`${handleId}-${index}`}
               id={handleId}
               type={handle.type}
               position={handle.position}
               style={style}
+              isConnectable={true}
             />
           )
         })}

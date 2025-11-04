@@ -71,12 +71,30 @@ const canContainerAcceptShape = (containerShape, childShape) => {
 }
 
 const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionType = 'sequence-flow' }) => {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const [nodes, setNodes, onNodesChangeInternal] = useNodesState([])
+  const [edges, setEdges, onEdgesChangeInternal] = useEdgesState([])
   const [isSaving, setIsSaving] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [attributeModal, setAttributeModal] = useState({ isOpen: false, node: null })
+
+  // Wrap handlers to block changes when locked
+  const onNodesChange = useCallback(
+    (changes) => {
+      if (isLocked) return
+      onNodesChangeInternal(changes)
+    },
+    [isLocked, onNodesChangeInternal]
+  )
+
+  const onEdgesChange = useCallback(
+    (changes) => {
+      if (isLocked) return
+      onEdgesChangeInternal(changes)
+    },
+    [isLocked, onEdgesChangeInternal]
+  )
 
   const nodeTypes = useMemo(
     () => ({
@@ -203,33 +221,42 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
 
   // Load diagram content when diagram changes
   useEffect(() => {
-    if (diagram?.content) {
-      try {
-        const content = JSON.parse(diagram.content)
-        const normalisedNodes = (content.nodes || []).map((node) =>
-          isContainerShape(node?.data?.shape)
-            ? {
-                ...node,
-                data: {
-                  ...node.data,
-                  isContainer: true,
-                },
-              }
-            : node
-        )
-        setNodes(normalisedNodes)
-        const enrichedEdges = (content.edges || []).map((edge) => applyEdgeVisuals(edge))
-        setEdges(enrichedEdges)
-      } catch (error) {
-        console.error('Error parsing diagram content:', error)
+    setIsLoading(true)
+    
+    // Small delay to show loading state
+    const timer = setTimeout(() => {
+      if (diagram?.content) {
+        try {
+          const content = JSON.parse(diagram.content)
+          const normalisedNodes = (content.nodes || []).map((node) =>
+            isContainerShape(node?.data?.shape)
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    isContainer: true,
+                  },
+                }
+              : node
+          )
+          setNodes(normalisedNodes)
+          const enrichedEdges = (content.edges || []).map((edge) => applyEdgeVisuals(edge))
+          setEdges(enrichedEdges)
+        } catch (error) {
+          console.error('Error parsing diagram content:', error)
+          setNodes([])
+          setEdges([])
+        }
+      } else {
         setNodes([])
         setEdges([])
       }
-    } else {
-      setNodes([])
-      setEdges([])
-    }
-  }, [diagram, applyEdgeVisuals, setEdges])
+      
+      setIsLoading(false)
+    }, 100) // Small delay to ensure smooth transition
+    
+    return () => clearTimeout(timer)
+  }, [diagram, applyEdgeVisuals, setEdges, setNodes])
 
   // Auto-save functionality
   useEffect(() => {
@@ -800,7 +827,15 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
       </div>
 
       {/* Diagram Canvas */}
-      <div className="flex-1">
+      <div className="flex-1 relative">
+        {isLoading && (
+          <div className="absolute inset-0 bg-white bg-opacity-80 z-50 flex items-center justify-center">
+            <div className="flex flex-col items-center space-y-3">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+              <span className="text-gray-600 font-medium">Loading diagram...</span>
+            </div>
+          </div>
+        )}
         <ReactFlowProvider>
           <ReactFlow
             nodes={nodes}
@@ -819,11 +854,24 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
             edgeTypes={edgeTypes}
             fitView
             connectionMode={ConnectionMode.Loose}
-            connectionRadius={80}
+            connectionRadius={120}
+            snapToGrid={false}
+            snapGrid={[15, 15]}
             attributionPosition="bottom-left"
+            defaultEdgeOptions={{
+              type: 'default',
+              style: { strokeWidth: 2 }
+            }}
+            nodesDraggable={!isLocked}
+            nodesConnectable={!isLocked}
+            nodesFocusable={!isLocked}
+            edgesFocusable={!isLocked}
+            elementsSelectable={!isLocked}
+            panOnDrag={!isLocked ? [1, 2] : true}
+            zoomOnDoubleClick={!isLocked}
           >
             <Controls showInteractive={false} />
-            <MiniMap />
+            <MiniMap nodeStrokeWidth={3} zoomable={!isLocked} pannable={!isLocked} />
             <Background variant="dots" gap={12} size={1} />
           </ReactFlow>
         </ReactFlowProvider>

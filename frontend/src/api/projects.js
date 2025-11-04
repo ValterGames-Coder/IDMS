@@ -25,6 +25,34 @@ export const projectsAPI = {
     const response = await apiClient.delete(`/projects/${projectId}`)
     return response.data
   },
+
+  // Invite methods
+  createInvite: async (projectId, expiresInHours = 24) => {
+    const response = await apiClient.post(`/projects/${projectId}/invite`, {
+      expires_in_hours: expiresInHours
+    })
+    return response.data
+  },
+
+  getInvites: async (projectId) => {
+    const response = await apiClient.get(`/projects/${projectId}/invites`)
+    return response.data
+  },
+
+  getInviteInfo: async (token) => {
+    const response = await apiClient.get(`/invite/${token}`)
+    return response.data
+  },
+
+  acceptInvite: async (token) => {
+    const response = await apiClient.post(`/invite/${token}/accept`)
+    return response.data
+  },
+
+  deleteInvite: async (projectId, inviteId) => {
+    const response = await apiClient.delete(`/projects/${projectId}/invites/${inviteId}`)
+    return response.data
+  },
 }
 
 

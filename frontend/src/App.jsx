@@ -4,13 +4,14 @@ import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
 import ProjectPage from './pages/ProjectPage'
+import InvitePage from './pages/InvitePage'
 import LoadingSpinner from './components/LoadingSpinner'
 
 function AppContent() {
   const { user, isLoading } = useAuth()
 
   if (isLoading) {
-    return <LoadingSpinner />
+    return <LoadingSpinner text="Initializing application..." />
   }
 
   return (
@@ -31,6 +32,10 @@ function AppContent() {
         <Route 
           path="/project/:projectId" 
           element={user ? <ProjectPage /> : <Navigate to="/login" replace />} 
+        />
+        <Route 
+          path="/invite/:token" 
+          element={<InvitePage />} 
         />
         <Route 
           path="/" 

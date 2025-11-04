@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { useAuth } from '../hooks/useAuth.jsx'
 import { Eye, EyeOff, UserPlus } from 'lucide-react'
@@ -10,6 +10,7 @@ const RegisterPage = () => {
   const [isLoading, setIsLoading] = useState(false)
   const { register: registerUser } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   
   const {
     register,
@@ -27,7 +28,9 @@ const RegisterPage = () => {
     
     if (result.success) {
       toast.success('Registration successful! Please log in.')
-      navigate('/login')
+      // Pass along the redirect URL if it exists
+      const from = location.state?.from
+      navigate('/login', from ? { state: { from } } : {})
     } else {
       toast.error(result.error)
     }

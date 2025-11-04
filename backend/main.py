@@ -4,7 +4,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from database import engine, get_db
 from models import Base
-from schemas import UserCreate, User, Token, ProjectCreate, Project, DiagramCreate, Diagram, DiagramLock
+from schemas import UserCreate, User, Token, ProjectCreate, Project, DiagramCreate, Diagram, DiagramLock, ProjectInviteCreate, ProjectInvite, ProjectInviteInfo
 from auth import authenticate_user, create_access_token, get_current_user
 from datetime import timedelta
 from config import settings
@@ -59,7 +59,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 # Project endpoints
 @app.get("/projects/", response_model=list[Project])
 async def read_projects(skip: int = 0, limit: int = 100, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    projects = crud.get_user_projects(db, user_id=current_user.id, skip=skip, limit=limit)
+    projects = crud.get_user_accessible_projects(db, user_id=current_user.id, skip=skip, limit=limit)
     return projects
 
 @app.post("/projects/", response_model=Project)
@@ -71,7 +71,7 @@ async def read_project(project_id: int, current_user: User = Depends(get_current
     db_project = crud.get_project(db, project_id=project_id)
     if db_project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     return db_project
 
@@ -92,7 +92,7 @@ async def read_diagrams(project_id: int, current_user: User = Depends(get_curren
     db_project = crud.get_project(db, project_id=project_id)
     if db_project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     diagrams = crud.get_project_diagrams(db, project_id=project_id)
@@ -104,7 +104,7 @@ async def create_diagram(project_id: int, diagram: DiagramCreate, current_user: 
     db_project = crud.get_project(db, project_id=project_id)
     if db_project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Create a new diagram with the correct project_id
@@ -120,8 +120,7 @@ async def read_diagram(diagram_id: int, current_user: User = Depends(get_current
         raise HTTPException(status_code=404, detail="Diagram not found")
     
     # Check if user has access to project
-    db_project = crud.get_project(db, project_id=db_diagram.project_id)
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=db_diagram.project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     return db_diagram
@@ -133,8 +132,7 @@ async def update_diagram(diagram_id: int, diagram_update: dict, current_user: Us
         raise HTTPException(status_code=404, detail="Diagram not found")
     
     # Check if user has access to project
-    db_project = crud.get_project(db, project_id=db_diagram.project_id)
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=db_diagram.project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     return crud.update_diagram(db=db, diagram_id=diagram_id, diagram_update=diagram_update)
@@ -146,8 +144,7 @@ async def delete_diagram(diagram_id: int, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Diagram not found")
     
     # Check if user has access to project
-    db_project = crud.get_project(db, project_id=db_diagram.project_id)
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=db_diagram.project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     crud.delete_diagram(db=db, diagram_id=diagram_id)
@@ -161,14 +158,15 @@ async def lock_diagram(diagram_id: int, current_user: User = Depends(get_current
         raise HTTPException(status_code=404, detail="Diagram not found")
     
     # Check if user has access to project
-    db_project = crud.get_project(db, project_id=db_diagram.project_id)
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=db_diagram.project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     # Check if diagram is already locked
     existing_lock = crud.get_active_diagram_lock(db, diagram_id=diagram_id)
-    if existing_lock and existing_lock.user_id != current_user.id:
-        raise HTTPException(status_code=409, detail="Diagram is already locked by another user")
+    if existing_lock:
+        # If locked by another user, return the existing lock instead of error
+        if existing_lock.user_id != current_user.id:
+            return existing_lock
     
     return crud.create_or_update_diagram_lock(db=db, diagram_id=diagram_id, user_id=current_user.id)
 
@@ -179,8 +177,7 @@ async def unlock_diagram(diagram_id: int, current_user: User = Depends(get_curre
         raise HTTPException(status_code=404, detail="Diagram not found")
     
     # Check if user has access to project
-    db_project = crud.get_project(db, project_id=db_diagram.project_id)
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=db_diagram.project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     crud.unlock_diagram(db=db, diagram_id=diagram_id, user_id=current_user.id)
@@ -193,8 +190,7 @@ async def get_diagram_lock(diagram_id: int, current_user: User = Depends(get_cur
         raise HTTPException(status_code=404, detail="Diagram not found")
     
     # Check if user has access to project
-    db_project = crud.get_project(db, project_id=db_diagram.project_id)
-    if db_project.owner_id != current_user.id:
+    if not crud.is_project_member(db, project_id=db_diagram.project_id, user_id=current_user.id):
         raise HTTPException(status_code=403, detail="Not enough permissions")
     
     lock = crud.get_active_diagram_lock(db, diagram_id=diagram_id)
@@ -202,6 +198,123 @@ async def get_diagram_lock(diagram_id: int, current_user: User = Depends(get_cur
         raise HTTPException(status_code=404, detail="Diagram is not locked")
     
     return lock
+
+# Project Invite endpoints
+@app.post("/projects/{project_id}/invite", response_model=ProjectInvite)
+async def create_project_invite(
+    project_id: int, 
+    invite_data: ProjectInviteCreate,
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """Create a new invite link for a project. Only project owner can create invites."""
+    db_project = crud.get_project(db, project_id=project_id)
+    if db_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Only owner can create invites
+    if db_project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only project owner can create invites")
+    
+    invite = crud.create_project_invite(
+        db=db, 
+        project_id=project_id, 
+        created_by=current_user.id,
+        expires_in_hours=invite_data.expires_in_hours
+    )
+    return invite
+
+@app.get("/projects/{project_id}/invites", response_model=list[ProjectInvite])
+async def get_project_invites(
+    project_id: int,
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """Get all active invites for a project. Only project owner can see invites."""
+    db_project = crud.get_project(db, project_id=project_id)
+    if db_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Only owner can see invites
+    if db_project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only project owner can see invites")
+    
+    invites = crud.get_active_project_invites(db=db, project_id=project_id)
+    return invites
+
+@app.get("/invite/{token}", response_model=ProjectInviteInfo)
+async def get_invite_info(token: str, db: Session = Depends(get_db)):
+    """Get information about an invite. Does not require authentication."""
+    from datetime import datetime
+    
+    invite = crud.get_invite_by_token(db, token=token)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    
+    project = crud.get_project(db, project_id=invite.project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    owner = crud.get_user(db, user_id=project.owner_id)
+    
+    is_expired = invite.expires_at < datetime.utcnow()
+    is_valid = invite.is_active and not is_expired
+    
+    return ProjectInviteInfo(
+        project_name=project.name,
+        project_description=project.description,
+        owner_username=owner.username,
+        is_valid=is_valid,
+        is_expired=is_expired
+    )
+
+@app.post("/invite/{token}/accept")
+async def accept_invite(
+    token: str, 
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Accept an invite and join the project."""
+    from datetime import datetime
+    
+    invite = crud.get_invite_by_token(db, token=token)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+    
+    # Check if invite is valid
+    if not invite.is_active:
+        raise HTTPException(status_code=400, detail="Invite is no longer active")
+    
+    if invite.expires_at < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invite has expired")
+    
+    # Check if user is already a member or owner
+    if crud.is_project_member(db, project_id=invite.project_id, user_id=current_user.id):
+        return {"message": "You are already a member of this project", "project_id": invite.project_id}
+    
+    # Add user as project member
+    crud.add_project_member(db=db, project_id=invite.project_id, user_id=current_user.id)
+    
+    return {"message": "Successfully joined the project", "project_id": invite.project_id}
+
+@app.delete("/projects/{project_id}/invites/{invite_id}")
+async def delete_invite(
+    project_id: int,
+    invite_id: int,
+    current_user: User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    """Deactivate an invite. Only project owner can delete invites."""
+    db_project = crud.get_project(db, project_id=project_id)
+    if db_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Only owner can delete invites
+    if db_project.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only project owner can delete invites")
+    
+    crud.deactivate_invite(db=db, invite_id=invite_id)
+    return {"message": "Invite deactivated successfully"}
 
 if __name__ == "__main__":
     import uvicorn
