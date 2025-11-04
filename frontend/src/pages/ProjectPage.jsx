@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from 'react-query'
 import { projectsAPI, diagramsAPI } from '../api'
@@ -6,7 +6,8 @@ import Layout from '../components/Layout'
 import DiagramEditor from '../components/DiagramEditor'
 import DiagramTree from '../components/DiagramTree'
 import DiagramPalette from '../components/DiagramPalette'
-import { ArrowLeft, Plus, FileText, Lock, Unlock } from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
+import { ArrowLeft, Plus, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const ProjectPage = () => {
@@ -19,6 +20,8 @@ const ProjectPage = () => {
   const [newDiagramName, setNewDiagramName] = useState('')
   const [diagramLock, setDiagramLock] = useState(null)
   const [connectionType, setConnectionType] = useState('sequence-flow')
+  const { user } = useAuth()
+  const heldLockRef = useRef(null)
 
   // Fetch project data
   const { data: project, isLoading: projectLoading } = useQuery(
@@ -61,46 +64,87 @@ const ProjectPage = () => {
     }
   )
 
-  // Lock diagram mutation
-  const lockDiagramMutation = useMutation(diagramsAPI.lockDiagram, {
-    onSuccess: (lockData) => {
-      setDiagramLock(lockData)
-      toast.success('Diagram locked successfully!')
-    },
-    onError: (error) => {
-      if (error.response?.status === 409) {
-        toast.error('Diagram is already locked by another user')
-      } else {
-        toast.error('Failed to lock diagram')
-      }
-    },
-  })
-
-  // Unlock diagram mutation
-  const unlockDiagramMutation = useMutation(diagramsAPI.unlockDiagram, {
-    onSuccess: () => {
-      setDiagramLock(null)
-      toast.success('Diagram unlocked successfully!')
-    },
-    onError: (error) => {
-      toast.error('Failed to unlock diagram')
-    },
-  })
-
-  // Check for existing lock when diagram is selected
-  useEffect(() => {
-    if (selectedDiagram) {
-      diagramsAPI.getDiagramLock(selectedDiagram.id)
-        .then(setDiagramLock)
-        .catch(() => setDiagramLock(null))
-    }
-  }, [selectedDiagram])
 
   useEffect(() => {
     if (selectedDiagram?.diagram_type !== 'bpmn') {
       setConnectionType('sequence-flow')
     }
   }, [selectedDiagram?.diagram_type])
+
+  useEffect(() => {
+    const diagramId = selectedDiagram?.id
+    const userId = user?.id
+
+    if (!diagramId || !userId) {
+      setDiagramLock(null)
+      return () => {}
+    }
+
+    let cancelled = false
+
+    const acquireLock = async () => {
+      try {
+        const lockData = await diagramsAPI.lockDiagram(diagramId)
+
+        if (cancelled) {
+          if (lockData?.user?.id === userId) {
+            diagramsAPI.unlockDiagram(diagramId).catch((error) => {
+              console.error('Failed to release diagram lock after cancellation', error)
+            })
+          }
+          return
+        }
+
+        setDiagramLock(lockData)
+
+        if (lockData?.user?.id === userId) {
+          heldLockRef.current = { diagramId, userId }
+        } else {
+          heldLockRef.current = null
+        }
+      } catch (error) {
+        if (cancelled) return
+
+        heldLockRef.current = null
+
+        if (error.response?.status === 409) {
+          try {
+            const existingLock = await diagramsAPI.getDiagramLock(diagramId)
+            if (!cancelled) {
+              setDiagramLock(existingLock)
+            }
+          } catch (fetchError) {
+            console.error('Failed to fetch existing diagram lock', fetchError)
+            if (!cancelled) {
+              setDiagramLock(null)
+            }
+          }
+
+          toast.error('Diagram is already locked by another user')
+        } else {
+          toast.error('Failed to lock diagram')
+          setDiagramLock(null)
+        }
+      }
+    }
+
+    acquireLock()
+
+    return () => {
+      cancelled = true
+
+      const heldLock = heldLockRef.current
+      if (heldLock && heldLock.diagramId === diagramId) {
+        heldLockRef.current = null
+        setDiagramLock((currentLock) =>
+          currentLock?.diagram_id === diagramId ? null : currentLock
+        )
+        diagramsAPI.unlockDiagram(diagramId).catch((error) => {
+          console.error('Failed to release diagram lock', error)
+        })
+      }
+    }
+  }, [selectedDiagram?.id, user?.id])
 
   const handleCreateDiagram = () => {
     if (!newDiagramName.trim()) {
@@ -114,17 +158,17 @@ const ProjectPage = () => {
     })
   }
 
-  const handleLockDiagram = () => {
-    if (selectedDiagram) {
-      lockDiagramMutation.mutate(selectedDiagram.id)
-    }
-  }
+  const lockedByCurrentUser = Boolean(
+    diagramLock && user && diagramLock.user?.id === user.id
+  )
 
-  const handleUnlockDiagram = () => {
-    if (selectedDiagram) {
-      unlockDiagramMutation.mutate(selectedDiagram.id)
-    }
-  }
+  const isDiagramLockedForEditing = Boolean(diagramLock && !lockedByCurrentUser)
+
+  const lockOwnerLabel = diagramLock
+    ? lockedByCurrentUser
+      ? 'you'
+      : diagramLock.user?.username
+    : undefined
 
   if (projectLoading || diagramsLoading) {
     return (
@@ -158,30 +202,13 @@ const ProjectPage = () => {
         </div>
         
         <div className="flex items-center space-x-2">
-          {selectedDiagram && (
-            <>
-              {diagramLock ? (
-                <button
-                  onClick={handleUnlockDiagram}
-                  className="btn btn-secondary btn-sm"
-                  disabled={unlockDiagramMutation.isLoading}
-                >
-                  <Unlock className="h-4 w-4 mr-1" />
-                  Unlock
-                </button>
-              ) : (
-                <button
-                  onClick={handleLockDiagram}
-                  className="btn btn-primary btn-sm"
-                  disabled={lockDiagramMutation.isLoading}
-                >
-                  <Lock className="h-4 w-4 mr-1" />
-                  Lock
-                </button>
-              )}
-            </>
+          {selectedDiagram && diagramLock && (
+            <span
+              className={`text-sm ${lockedByCurrentUser ? 'text-gray-500' : 'text-red-600'}`}
+            >
+              Locked by {lockedByCurrentUser ? 'you' : diagramLock.user?.username}
+            </span>
           )}
-          
           <button
             onClick={() => setShowCreateModal(true)}
             className="btn btn-primary btn-sm"
@@ -214,8 +241,8 @@ const ProjectPage = () => {
             <DiagramEditor
               diagram={selectedDiagram}
               diagramType={selectedDiagram.diagram_type}
-              isLocked={!!diagramLock}
-              lockUser={diagramLock?.user?.username}
+              isLocked={isDiagramLockedForEditing}
+              lockUser={lockOwnerLabel}
               connectionType={connectionType}
             />
           ) : (

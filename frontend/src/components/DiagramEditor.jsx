@@ -19,6 +19,14 @@ import ShapeNode from './nodes/ShapeNode'
 
 const CONTAINER_SHAPES = new Set(['lane', 'pool'])
 
+const createUniqueId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const ERD_HANDLE_SIDES = ['top', 'right', 'bottom', 'left']
+
+const isErdEntity = (node) => node?.data?.shape === 'entity'
+const isErdRelationship = (node) => node?.data?.shape === 'diamond'
+const isErdAttribute = (node) => node?.data?.shape === 'circle'
+
 const isContainerShape = (shape) => CONTAINER_SHAPES.has(shape)
 
 const isContainerNode = (node) => isContainerShape(node?.data?.shape)
@@ -74,58 +82,68 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
     []
   )
 
-  const getEdgeConfig = useCallback((flowType) => {
-    switch (flowType) {
-      case 'default-flow':
-        return {
-          style: { stroke: '#1f2937', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#1f2937' },
-          label: 'default',
-          labelBgPadding: [8, 4],
-          labelBgBorderRadius: 4,
-          labelBgStyle: { fill: '#f8fafc', color: '#1f2937' },
-        }
-      case 'conditional-flow':
-        return {
-          style: { stroke: '#2563eb', strokeWidth: 2, strokeDasharray: '6 4' },
-          markerStart: { type: MarkerType.Diamond, color: '#2563eb' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#2563eb' },
-          label: 'condition',
-          labelBgPadding: [8, 4],
-          labelBgBorderRadius: 4,
-          labelBgStyle: { fill: '#1d4ed8', color: '#ffffff' },
-        }
-      case 'message-flow':
-        return {
-          style: { stroke: '#0ea5e9', strokeWidth: 2, strokeDasharray: '8 4' },
-          markerStart: { type: MarkerType.Circle, color: '#0ea5e9' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
-          animated: true,
-        }
-      case 'association':
-        return {
-          style: { stroke: '#6b7280', strokeWidth: 1.5, strokeDasharray: '4 4' },
-          type: 'straight',
-        }
-      case 'data-association':
-        return {
-          style: { stroke: '#047857', strokeWidth: 1.5, strokeDasharray: '4 4' },
-          type: 'straight',
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#047857' },
-        }
-      case 'compensation-flow':
-        return {
-          style: { stroke: '#9333ea', strokeWidth: 2, strokeDasharray: '3 3' },
-          markerEnd: { type: MarkerType.Arrow, color: '#9333ea' },
-        }
-      case 'sequence-flow':
-      default:
+  const getEdgeConfig = useCallback(
+    (flowType) => {
+      if (diagramType === 'erd') {
         return {
           style: { stroke: '#111827', strokeWidth: 2 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#111827' },
+          type: 'straight',
         }
-    }
-  }, [])
+      }
+
+      switch (flowType) {
+        case 'default-flow':
+          return {
+            style: { stroke: '#1f2937', strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#1f2937' },
+            label: 'default',
+            labelBgPadding: [8, 4],
+            labelBgBorderRadius: 4,
+            labelBgStyle: { fill: '#f8fafc', color: '#1f2937' },
+          }
+        case 'conditional-flow':
+          return {
+            style: { stroke: '#2563eb', strokeWidth: 2, strokeDasharray: '6 4' },
+            markerStart: { type: MarkerType.Diamond, color: '#2563eb' },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#2563eb' },
+            label: 'condition',
+            labelBgPadding: [8, 4],
+            labelBgBorderRadius: 4,
+            labelBgStyle: { fill: '#1d4ed8', color: '#ffffff' },
+          }
+        case 'message-flow':
+          return {
+            style: { stroke: '#0ea5e9', strokeWidth: 2, strokeDasharray: '8 4' },
+            markerStart: { type: MarkerType.Circle, color: '#0ea5e9' },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#0ea5e9' },
+            animated: true,
+          }
+        case 'association':
+          return {
+            style: { stroke: '#6b7280', strokeWidth: 1.5, strokeDasharray: '4 4' },
+            type: 'straight',
+          }
+        case 'data-association':
+          return {
+            style: { stroke: '#047857', strokeWidth: 1.5, strokeDasharray: '4 4' },
+            type: 'straight',
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#047857' },
+          }
+        case 'compensation-flow':
+          return {
+            style: { stroke: '#9333ea', strokeWidth: 2, strokeDasharray: '3 3' },
+            markerEnd: { type: MarkerType.Arrow, color: '#9333ea' },
+          }
+        case 'sequence-flow':
+        default:
+          return {
+            style: { stroke: '#111827', strokeWidth: 2 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#111827' },
+          }
+      }
+    },
+    [diagramType]
+  )
 
   const applyEdgeVisuals = useCallback(
     (edge) => {
@@ -218,6 +236,114 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
     (params) => {
       if (isLocked) return
 
+      if (diagramType === 'erd') {
+        const sourceNode = nodes.find((node) => node.id === params.source)
+        const targetNode = nodes.find((node) => node.id === params.target)
+
+        if (!sourceNode || !targetNode) {
+          return
+        }
+
+        const createErdEdge = (sourceId, targetId, flowType = 'erd') => {
+          const baseEdge = {
+            id: createUniqueId('erd-edge'),
+            source: sourceId,
+            target: targetId,
+            data: {
+              flowType,
+            },
+          }
+
+          return applyEdgeVisuals(baseEdge)
+        }
+
+        if (isErdEntity(sourceNode) && isErdEntity(targetNode)) {
+          const relationshipWidth = 130
+          const relationshipHeight = 130
+
+          const sourceBounds = getNodeBounds(sourceNode)
+          const targetBounds = getNodeBounds(targetNode)
+
+          const sourceCenter = {
+            x: sourceBounds.x + sourceBounds.width / 2,
+            y: sourceBounds.y + sourceBounds.height / 2,
+          }
+          const targetCenter = {
+            x: targetBounds.x + targetBounds.width / 2,
+            y: targetBounds.y + targetBounds.height / 2,
+          }
+
+          const midpoint = {
+            x: (sourceCenter.x + targetCenter.x) / 2,
+            y: (sourceCenter.y + targetCenter.y) / 2,
+          }
+
+          const relationshipNodeId = createUniqueId('relationship')
+          const relationshipNode = {
+            id: relationshipNodeId,
+            type: 'shape',
+            position: {
+              x: midpoint.x - relationshipWidth / 2,
+              y: midpoint.y - relationshipHeight / 2,
+            },
+            data: {
+              label: 'Relationship',
+              shape: 'diamond',
+              background: '#e9d5ff',
+              borderColor: '#9333ea',
+              textColor: '#581c87',
+              width: relationshipWidth,
+              height: relationshipHeight,
+              borderWidth: 3,
+              handles: { incoming: ERD_HANDLE_SIDES, outgoing: ERD_HANDLE_SIDES },
+            },
+          }
+
+          setNodes((currentNodes) => currentNodes.concat(relationshipNode))
+
+          setEdges((currentEdges) => {
+            const newEdges = [
+              createErdEdge(params.source, relationshipNodeId),
+              createErdEdge(relationshipNodeId, params.target),
+            ]
+
+            return currentEdges.concat(newEdges)
+          })
+
+          return
+        }
+
+        const allowedAttributeConnection =
+          (isErdAttribute(sourceNode) && isErdEntity(targetNode)) ||
+          (isErdEntity(sourceNode) && isErdAttribute(targetNode)) ||
+          (isErdRelationship(sourceNode) && isErdEntity(targetNode)) ||
+          (isErdEntity(sourceNode) && isErdRelationship(targetNode)) ||
+          (isErdRelationship(sourceNode) && isErdAttribute(targetNode)) ||
+          (isErdAttribute(sourceNode) && isErdRelationship(targetNode))
+
+        if (!allowedAttributeConnection && !(isErdRelationship(sourceNode) && isErdRelationship(targetNode))) {
+          return
+        }
+
+        setEdges((currentEdges) => {
+          const edgeExists = currentEdges.some(
+            (edge) =>
+              edge.source === params.source &&
+              edge.target === params.target &&
+              edge.data?.flowType === 'erd'
+          )
+
+          if (edgeExists) {
+            return currentEdges
+          }
+
+          const newEdge = createErdEdge(params.source, params.target)
+          return currentEdges.concat(newEdge)
+        })
+
+        return
+      }
+
       setEdges((eds) => {
         const config = getEdgeConfig(connectionType)
         const mergedParams = {
@@ -233,7 +359,7 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
         return updated.map((edge) => applyEdgeVisuals(edge))
       })
     },
-    [applyEdgeVisuals, connectionType, getEdgeConfig, isLocked]
+    [applyEdgeVisuals, connectionType, diagramType, getEdgeConfig, isLocked, nodes]
   )
 
   const handleNodeDoubleClick = useCallback(
@@ -632,7 +758,7 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
             connectionRadius={80}
             attributionPosition="bottom-left"
           >
-            <Controls />
+            <Controls showInteractive={false} />
             <MiniMap />
             <Background variant="dots" gap={12} size={1} />
           </ReactFlow>
