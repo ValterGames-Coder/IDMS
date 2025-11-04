@@ -16,6 +16,8 @@ import { diagramsAPI } from '../api'
 import { Lock, Save, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ShapeNode from './nodes/ShapeNode'
+import ERDEdge from './edges/ERDEdge'
+import AttributeModal from './AttributeModal'
 
 const CONTAINER_SHAPES = new Set(['lane', 'pool'])
 
@@ -24,8 +26,7 @@ const createUniqueId = (prefix = 'id') => `${prefix}-${Date.now()}-${Math.random
 const ERD_HANDLE_SIDES = ['top', 'right', 'bottom', 'left']
 
 const isErdEntity = (node) => node?.data?.shape === 'entity'
-const isErdRelationship = (node) => node?.data?.shape === 'diamond'
-const isErdAttribute = (node) => node?.data?.shape === 'circle'
+const isErdRelationship = (node) => node?.data?.shape === 'relationship'
 
 const isContainerShape = (shape) => CONTAINER_SHAPES.has(shape)
 
@@ -74,10 +75,19 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [isSaving, setIsSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState(null)
+  const [contextMenu, setContextMenu] = useState(null)
+  const [attributeModal, setAttributeModal] = useState({ isOpen: false, node: null })
 
   const nodeTypes = useMemo(
     () => ({
       shape: ShapeNode,
+    }),
+    []
+  )
+
+  const edgeTypes = useMemo(
+    () => ({
+      erd: ERDEdge,
     }),
     []
   )
@@ -244,22 +254,10 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
           return
         }
 
-        const createErdEdge = (sourceId, targetId, flowType = 'erd') => {
-          const baseEdge = {
-            id: createUniqueId('erd-edge'),
-            source: sourceId,
-            target: targetId,
-            data: {
-              flowType,
-            },
-          }
-
-          return applyEdgeVisuals(baseEdge)
-        }
-
+        // Only allow connections between Entity nodes
         if (isErdEntity(sourceNode) && isErdEntity(targetNode)) {
-          const relationshipWidth = 130
-          const relationshipHeight = 130
+          const relationshipWidth = 140
+          const relationshipHeight = 140
 
           const sourceBounds = getNodeBounds(sourceNode)
           const targetBounds = getNodeBounds(targetNode)
@@ -288,23 +286,60 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
             },
             data: {
               label: 'Relationship',
-              shape: 'diamond',
-              background: '#e9d5ff',
+              shape: 'relationship',
+              background: '#faf5ff',
               borderColor: '#9333ea',
               textColor: '#581c87',
               width: relationshipWidth,
               height: relationshipHeight,
               borderWidth: 3,
+              attributes: [],
               handles: { incoming: ERD_HANDLE_SIDES, outgoing: ERD_HANDLE_SIDES },
             },
           }
 
           setNodes((currentNodes) => currentNodes.concat(relationshipNode))
 
+          // Get connection type data from connectionType
+          const connectionData = connectionType ? 
+            (connectionType.startsWith('erd-') ? 
+              (() => {
+                // Parse connection type to extract cardinality and optional flags
+                if (connectionType === 'erd-one-to-one') {
+                  return { sourceCardinality: 'one', targetCardinality: 'one', sourceOptional: false, targetOptional: false }
+                } else if (connectionType === 'erd-one-to-one-optional') {
+                  return { sourceCardinality: 'one', targetCardinality: 'one', sourceOptional: true, targetOptional: true }
+                } else if (connectionType === 'erd-one-to-many') {
+                  return { sourceCardinality: 'one', targetCardinality: 'many', sourceOptional: false, targetOptional: false }
+                } else if (connectionType === 'erd-one-to-many-optional') {
+                  return { sourceCardinality: 'one', targetCardinality: 'many', sourceOptional: true, targetOptional: false }
+                } else if (connectionType === 'erd-many-to-many') {
+                  return { sourceCardinality: 'many', targetCardinality: 'many', sourceOptional: false, targetOptional: false }
+                }
+                return { sourceCardinality: 'one', targetCardinality: 'many', sourceOptional: false, targetOptional: false }
+              })()
+              : { sourceCardinality: 'one', targetCardinality: 'many', sourceOptional: false, targetOptional: false }
+            )
+            : { sourceCardinality: 'one', targetCardinality: 'many', sourceOptional: false, targetOptional: false }
+
           setEdges((currentEdges) => {
             const newEdges = [
-              createErdEdge(params.source, relationshipNodeId),
-              createErdEdge(relationshipNodeId, params.target),
+              {
+                id: createUniqueId('erd-edge'),
+                source: params.source,
+                target: relationshipNodeId,
+                type: 'erd',
+                style: { stroke: '#9333ea', strokeWidth: 2 },
+                data: connectionData,
+              },
+              {
+                id: createUniqueId('erd-edge'),
+                source: relationshipNodeId,
+                target: params.target,
+                type: 'erd',
+                style: { stroke: '#9333ea', strokeWidth: 2 },
+                data: connectionData,
+              },
             ]
 
             return currentEdges.concat(newEdges)
@@ -313,34 +348,8 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
           return
         }
 
-        const allowedAttributeConnection =
-          (isErdAttribute(sourceNode) && isErdEntity(targetNode)) ||
-          (isErdEntity(sourceNode) && isErdAttribute(targetNode)) ||
-          (isErdRelationship(sourceNode) && isErdEntity(targetNode)) ||
-          (isErdEntity(sourceNode) && isErdRelationship(targetNode)) ||
-          (isErdRelationship(sourceNode) && isErdAttribute(targetNode)) ||
-          (isErdAttribute(sourceNode) && isErdRelationship(targetNode))
-
-        if (!allowedAttributeConnection && !(isErdRelationship(sourceNode) && isErdRelationship(targetNode))) {
-          return
-        }
-
-        setEdges((currentEdges) => {
-          const edgeExists = currentEdges.some(
-            (edge) =>
-              edge.source === params.source &&
-              edge.target === params.target &&
-              edge.data?.flowType === 'erd'
-          )
-
-          if (edgeExists) {
-            return currentEdges
-          }
-
-          const newEdge = createErdEdge(params.source, params.target)
-          return currentEdges.concat(newEdge)
-        })
-
+        // Don't allow other types of connections in ERD
+        toast.error('You can only connect Entity nodes in ERD diagrams')
         return
       }
 
@@ -362,13 +371,35 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
     [applyEdgeVisuals, connectionType, diagramType, getEdgeConfig, isLocked, nodes]
   )
 
+  const handleNodeContextMenu = useCallback(
+    (event, node) => {
+      event.preventDefault()
+      if (isLocked) return
+
+      // Show context menu for all nodes
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        node,
+      })
+    },
+    [isLocked]
+  )
+
   const handleNodeDoubleClick = useCallback(
     (event, node) => {
       event.preventDefault()
       if (isLocked) return
 
+      // For ERD, open modal on double click
+      if (diagramType === 'erd' && (isErdEntity(node) || isErdRelationship(node))) {
+        setAttributeModal({ isOpen: true, node })
+        return
+      }
+
+      // Default behavior for other node types
       const currentLabel = node?.data?.label ?? ''
-      const newLabel = window.prompt('Введите новое название элемента', currentLabel)
+      const newLabel = window.prompt('Enter new element name:', currentLabel)
       if (newLabel === null) {
         return
       }
@@ -392,8 +423,39 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
         )
       )
     },
-    [isLocked, setNodes]
+    [diagramType, isLocked, setNodes]
   )
+
+  const handleAttributeModalSave = useCallback(
+    (data) => {
+      if (!attributeModal.node) return
+
+      setNodes((existingNodes) =>
+        existingNodes.map((existingNode) =>
+          existingNode.id === attributeModal.node.id
+            ? {
+                ...existingNode,
+                data: {
+                  ...existingNode.data,
+                  label: data.label,
+                  attributes: data.attributes,
+                },
+              }
+            : existingNode
+        )
+      )
+    },
+    [attributeModal.node, setNodes]
+  )
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClick = () => setContextMenu(null)
+    if (contextMenu) {
+      window.addEventListener('click', handleClick)
+      return () => window.removeEventListener('click', handleClick)
+    }
+  }, [contextMenu])
 
   const handleSave = useCallback(() => {
     if (!diagram || isLocked) return
@@ -747,12 +809,14 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeDoubleClick={handleNodeDoubleClick}
+            onNodeContextMenu={handleNodeContextMenu}
             onNodeDragStop={handleNodeDragStop}
             onEdgeDoubleClick={handleEdgeDoubleClick}
             onDrop={onDrop}
             onDragOver={onDragOver}
             onInit={handleInit}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             fitView
             connectionMode={ConnectionMode.Loose}
             connectionRadius={80}
@@ -775,6 +839,90 @@ const DiagramEditor = ({ diagram, diagramType, isLocked, lockUser, connectionTyp
           {isSaving && <span className="text-blue-600">Saving...</span>}
         </div>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Edit Attributes - только для ERD */}
+          {diagramType === 'erd' && (isErdEntity(contextMenu.node) || isErdRelationship(contextMenu.node)) && (
+            <button
+              onClick={() => {
+                setAttributeModal({ isOpen: true, node: contextMenu.node })
+                setContextMenu(null)
+              }}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors flex items-center gap-2"
+            >
+              <span>✏️</span>
+              <span>Edit Attributes</span>
+            </button>
+          )}
+          
+          {/* Rename - для всех типов диаграмм */}
+          <button
+            onClick={() => {
+              const currentLabel = contextMenu.node?.data?.label ?? ''
+              const newLabel = window.prompt('Enter new name:', currentLabel)
+              if (newLabel && newLabel.trim()) {
+                setNodes((existingNodes) =>
+                  existingNodes.map((node) =>
+                    node.id === contextMenu.node.id
+                      ? {
+                          ...node,
+                          data: {
+                            ...node.data,
+                            label: newLabel.trim(),
+                          },
+                        }
+                      : node
+                  )
+                )
+              }
+              setContextMenu(null)
+            }}
+            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 transition-colors flex items-center gap-2"
+          >
+            <span>📝</span>
+            <span>Rename</span>
+          </button>
+          
+          <hr className="my-1" />
+          
+          {/* Delete - для всех типов диаграмм */}
+          <button
+            onClick={() => {
+              const nodeName = contextMenu.node?.data?.label || 'Node'
+              setNodes((nds) => nds.filter((n) => n.id !== contextMenu.node.id))
+              setEdges((eds) =>
+                eds.filter(
+                  (e) => e.source !== contextMenu.node.id && e.target !== contextMenu.node.id
+                )
+              )
+              setContextMenu(null)
+              toast.success(`"${nodeName}" deleted`)
+            }}
+            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+          >
+            <span>🗑️</span>
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
+
+      {/* Attribute Modal */}
+      <AttributeModal
+        isOpen={attributeModal.isOpen}
+        onClose={() => setAttributeModal({ isOpen: false, node: null })}
+        onSave={handleAttributeModalSave}
+        nodeData={attributeModal.node?.data}
+        isEntity={isErdEntity(attributeModal.node)}
+      />
     </div>
   )
 }

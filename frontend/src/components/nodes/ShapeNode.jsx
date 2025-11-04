@@ -118,13 +118,15 @@ const ShapeNode = ({ data = {} }) => {
     baseTextStyles.fontWeight = fontWeight
   }
 
-  if (decoration === 'underline') {
-    baseTextStyles.textDecoration = 'underline'
-  }
-
-  if (decoration === 'dashed') {
-    baseTextStyles.borderBottom = `2px dashed ${textColor}`
-    baseTextStyles.paddingBottom = 4
+  if (['underline', 'double-underline', 'dashed-underline', 'dashed'].includes(decoration)) {
+    baseTextStyles.textDecorationLine = 'underline'
+    baseTextStyles.textDecorationStyle =
+      decoration === 'double-underline'
+        ? 'double'
+        : decoration === 'dashed' || decoration === 'dashed-underline'
+          ? 'dashed'
+          : 'solid'
+    baseTextStyles.textDecorationThickness = decoration === 'double-underline' ? 3 : 2
   }
 
   const renderIcon = (sizeOverride) => {
@@ -224,6 +226,9 @@ const ShapeNode = ({ data = {} }) => {
         color: textColor,
         ...(borderDash ? { borderStyle: 'dashed' } : {}),
         overflow: 'hidden',
+        boxShadow: data.doubleBorder
+          ? `inset 0 0 0 ${Math.max(3, borderWidth + 1)}px ${data.doubleBorderColor || borderColor}`
+          : undefined,
         ...extraStyles,
       }}
     >
@@ -290,6 +295,9 @@ const ShapeNode = ({ data = {} }) => {
             borderRadius: 16,
             transform: 'rotate(45deg)',
             color: textColor,
+            boxShadow: innerBorderWidth
+              ? `inset 0 0 0 ${innerBorderWidth}px ${innerBorderColor || borderColor}`
+              : undefined,
           }}
         >
           <div
@@ -489,12 +497,165 @@ const ShapeNode = ({ data = {} }) => {
     </div>
   )
 
+  const renderEntity = () => {
+    const attributesList = Array.isArray(data.attributes) ? data.attributes : []
+    const AssociativeIcon = data.associative && Icons.Link2 ? Icons.Link2 : null
+    const placeholderText = data.attributePlaceholder || 'Right-click to add attributes'
+
+    return (
+      <div
+        className="flex flex-col rounded"
+        style={{
+          width,
+          minHeight: height,
+          backgroundColor: background,
+          borderColor,
+          borderStyle,
+          borderWidth,
+          borderRadius,
+          color: textColor,
+          boxShadow: data.doubleBorder
+            ? `inset 0 0 0 ${Math.max(3, borderWidth + 1)}px ${data.doubleBorderColor || borderColor}`
+            : undefined,
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          className="px-3 py-2 text-xs font-semibold uppercase tracking-wide flex items-center justify-between"
+          style={{
+            backgroundColor: headerBackground,
+            color: headerTextColor,
+            letterSpacing: 0.6,
+          }}
+        >
+          <span>{label}</span>
+          {AssociativeIcon && <AssociativeIcon className="h-4 w-4" />}
+        </div>
+        <div className="flex-1 w-full">
+          {attributesList.length > 0 ? (
+            <div className="flex flex-col w-full">
+              {attributesList.map((attribute, index) => {
+                const isPrimary = attribute.primary || false
+                const attrName = attribute.name || attribute
+                return (
+                  <div
+                    key={`${attrName}-${index}`}
+                    className="px-3 py-2 text-sm text-left flex items-center justify-between"
+                    style={{
+                      color: textColor,
+                      backgroundColor: index % 2 === 1 ? 'rgba(148, 163, 184, 0.12)' : 'transparent',
+                      borderTop: index === 0 ? 'none' : '1px solid rgba(148, 163, 184, 0.3)',
+                    }}
+                  >
+                    <span className={isPrimary ? 'font-semibold underline' : ''}>
+                      {attrName}
+                    </span>
+                    {isPrimary && (
+                      <span className="text-xs font-bold" style={{ color: '#ea580c' }}>
+                        PK
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div
+              className="px-3 py-4 text-xs text-center"
+              style={{ color: 'rgba(100, 116, 139, 0.8)' }}
+            >
+              {placeholderText}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderRelationship = () => {
+    const attributesList = Array.isArray(data.attributes) ? data.attributes : []
+
+    return (
+      <div className="flex flex-col items-center">
+        <div
+          className="flex items-center justify-center"
+          style={{ width: circleSize, height: circleSize }}
+        >
+          <div
+            className="flex items-center justify-center"
+            style={{
+              width: circleSize * 0.72,
+              height: circleSize * 0.72,
+              backgroundColor: background,
+              borderColor,
+              borderStyle,
+              borderWidth,
+              borderRadius: 16,
+              transform: 'rotate(45deg)',
+              color: textColor,
+              position: 'relative',
+              overflow: 'visible',
+            }}
+          >
+            <div
+              style={{
+                transform: 'rotate(-45deg)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '100%',
+                padding: '8px',
+              }}
+            >
+              <span style={{ ...baseTextStyles, fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                {label}
+              </span>
+              {attributesList.length > 0 && (
+                <div style={{ fontSize: 10, textAlign: 'center', color: 'rgba(88, 28, 135, 0.8)' }}>
+                  {attributesList.length} attr{attributesList.length !== 1 ? 's' : ''}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {!showLabelInside && labelPosition === 'bottom' && renderLabel('bottom')}
+      </div>
+    )
+  }
+
+  const renderTriangle = () => (
+    <div className="flex flex-col items-center" style={{ width: Math.max(width, 100) }}>
+      <div className="relative" style={{ width, height }}>
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+          <polygon
+            points={`${width / 2},0 ${width},${height} 0,${height}`}
+            fill={background}
+            stroke={borderColor}
+            strokeWidth={borderWidth}
+          />
+        </svg>
+        {showLabelInside && (
+          <div
+            className="absolute inset-0 flex items-center justify-center"
+            style={{ color: textColor }}
+          >
+            <span style={{ ...baseTextStyles, textAlign: 'center' }}>{label}</span>
+          </div>
+        )}
+      </div>
+      {!showLabelInside && renderLabel('bottom')}
+    </div>
+  )
+
   const renderByShape = () => {
     switch (shape) {
       case 'circle':
         return renderCircle()
       case 'diamond':
         return renderDiamond()
+      case 'relationship':
+        return renderRelationship()
       case 'parallelogram':
         return renderParallelogram()
       case 'cylinder':
@@ -505,6 +666,10 @@ const ShapeNode = ({ data = {} }) => {
         return renderDataObject()
       case 'annotation':
         return renderAnnotation()
+      case 'entity':
+        return renderEntity()
+      case 'triangle':
+        return renderTriangle()
       default:
         return renderRectangle()
     }

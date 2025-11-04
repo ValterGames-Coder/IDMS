@@ -131,7 +131,7 @@ const SWIMLANES = [
   },
 ]
 
-const CONNECTORS = [
+const BPMN_CONNECTORS = [
   {
     id: 'sequence-flow',
     name: 'Sequence Flow',
@@ -360,12 +360,148 @@ const buildBpmnGroups = () => {
   ]
 }
 
+const buildErdConfiguration = () => {
+  const entities = [
+    {
+      id: 'erd-entity',
+      name: 'Entity',
+      paletteIcon: 'Square',
+      previewColor: '#2563eb',
+      nodeConfig: {
+        label: 'Entity',
+        shape: 'entity',
+        width: 240,
+        height: 200,
+        background: '#ffffff',
+        borderColor: '#2563eb',
+        borderWidth: 2,
+        borderRadius: 12,
+        textColor: '#0f172a',
+        headerBackground: '#2563eb',
+        headerTextColor: '#ffffff',
+        attributes: [],
+        handles: { incoming: ALL_SIDES, outgoing: ALL_SIDES },
+      },
+    },
+  ]
+
+  const relationships = [
+    {
+      id: 'erd-relationship',
+      name: 'Relationship',
+      paletteIcon: 'Diamond',
+      previewColor: '#9333ea',
+      nodeConfig: {
+        label: 'Relationship',
+        shape: 'relationship',
+        width: 140,
+        height: 140,
+        background: '#faf5ff',
+        borderColor: '#9333ea',
+        borderWidth: 3,
+        textColor: '#581c87',
+        attributes: [],
+        handles: { incoming: ALL_SIDES, outgoing: ALL_SIDES },
+      },
+    },
+  ]
+
+  const connectors = [
+    {
+      id: 'erd-one-to-one',
+      name: 'One to One (Mandatory)',
+      connectionType: 'erd-one-to-one',
+      description: 'Exactly one entity on both ends',
+      icon: 'Minus',
+      data: {
+        sourceCardinality: 'one',
+        targetCardinality: 'one',
+        sourceOptional: false,
+        targetOptional: false,
+      },
+    },
+    {
+      id: 'erd-one-to-one-optional',
+      name: 'One to One (Optional)',
+      connectionType: 'erd-one-to-one-optional',
+      description: 'One to one with nullable relationship',
+      icon: 'Circle',
+      data: {
+        sourceCardinality: 'one',
+        targetCardinality: 'one',
+        sourceOptional: true,
+        targetOptional: true,
+      },
+    },
+    {
+      id: 'erd-one-to-many',
+      name: 'One to Many (Mandatory)',
+      connectionType: 'erd-one-to-many',
+      description: 'One parent with many children',
+      icon: 'GitBranch',
+      data: {
+        sourceCardinality: 'one',
+        targetCardinality: 'many',
+        sourceOptional: false,
+        targetOptional: false,
+      },
+    },
+    {
+      id: 'erd-one-to-many-optional',
+      name: 'One to Many (Optional)',
+      connectionType: 'erd-one-to-many-optional',
+      description: 'One to many with nullable relationship',
+      icon: 'GitFork',
+      data: {
+        sourceCardinality: 'one',
+        targetCardinality: 'many',
+        sourceOptional: true,
+        targetOptional: false,
+      },
+    },
+    {
+      id: 'erd-many-to-many',
+      name: 'Many to Many',
+      connectionType: 'erd-many-to-many',
+      description: 'Many-to-many relationship',
+      icon: 'Network',
+      data: {
+        sourceCardinality: 'many',
+        targetCardinality: 'many',
+        sourceOptional: false,
+        targetOptional: false,
+      },
+    },
+  ]
+
+  return {
+    groups: [
+      {
+        title: 'Entities',
+        items: entities,
+      },
+      {
+        title: 'Relationships',
+        items: relationships,
+      },
+    ],
+    connectorsTitle: 'Connection Types',
+    connectors,
+  }
+}
+
 const DiagramPalette = ({ diagramType, selectedConnectionType, onConnectionTypeChange }) => {
   const configuration = useMemo(() => {
     if (diagramType === 'bpmn') {
       return {
         groups: buildBpmnGroups(),
+        connectorsTitle: 'Connecting Objects',
+        connectors: BPMN_CONNECTORS,
       }
+    }
+
+    if (diagramType === 'erd') {
+      return buildErdConfiguration()
     }
 
     const fallbackElements = (() => {
@@ -525,6 +661,8 @@ const DiagramPalette = ({ diagramType, selectedConnectionType, onConnectionTypeC
           items: fallbackElements,
         },
       ],
+      connectors: [],
+      connectorsTitle: null,
     }
   }, [diagramType])
 
@@ -541,8 +679,12 @@ const DiagramPalette = ({ diagramType, selectedConnectionType, onConnectionTypeC
   const [collapsedGroups, setCollapsedGroups] = useState({})
 
   const groupsKey = useMemo(
-    () => configuration.groups.map((group) => group.title).join('|'),
-    [configuration.groups]
+    () =>
+      [
+        configuration.groups.map((group) => group.title).join('|'),
+        configuration.connectorsTitle || '',
+      ].join('::'),
+    [configuration.groups, configuration.connectorsTitle]
   )
 
   useEffect(() => {
@@ -551,12 +693,12 @@ const DiagramPalette = ({ diagramType, selectedConnectionType, onConnectionTypeC
       configuration.groups.forEach((group) => {
         next[group.title] = prev?.[group.title] ?? false
       })
-      if (diagramType === 'bpmn') {
-        next['Connecting Objects'] = prev?.['Connecting Objects'] ?? false
+      if (configuration.connectorsTitle) {
+        next[configuration.connectorsTitle] = prev?.[configuration.connectorsTitle] ?? false
       }
       return next
     })
-  }, [groupsKey, diagramType])
+  }, [groupsKey, configuration.connectorsTitle])
 
   const toggleGroup = (title) => {
     setCollapsedGroups((prev) => ({
@@ -671,28 +813,32 @@ const DiagramPalette = ({ diagramType, selectedConnectionType, onConnectionTypeC
           )
         })}
 
-        {diagramType === 'bpmn' && (
+        {configuration.connectors && configuration.connectors.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-                Connecting Objects
+                {configuration.connectorsTitle || 'Connectors'}
               </h3>
               <button
                 type="button"
-                onClick={() => toggleGroup('Connecting Objects')}
+                onClick={() => toggleGroup(configuration.connectorsTitle || 'Connectors')}
                 className="text-gray-500 hover:text-gray-700"
-                aria-label={collapsedGroups['Connecting Objects'] ? 'Expand connectors' : 'Collapse connectors'}
+                aria-label={
+                  collapsedGroups[configuration.connectorsTitle || 'Connectors']
+                    ? 'Expand connectors'
+                    : 'Collapse connectors'
+                }
               >
-                {collapsedGroups['Connecting Objects'] ? (
+                {collapsedGroups[configuration.connectorsTitle || 'Connectors'] ? (
                   <ChevronRight className="h-4 w-4" />
                 ) : (
                   <ChevronDown className="h-4 w-4" />
                 )}
               </button>
             </div>
-            {!collapsedGroups['Connecting Objects'] && (
+            {!collapsedGroups[configuration.connectorsTitle || 'Connectors'] && (
               <div className="space-y-2">
-                {CONNECTORS.map(renderConnector)}
+                {configuration.connectors.map(renderConnector)}
               </div>
             )}
           </div>
