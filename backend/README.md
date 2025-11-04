@@ -1,6 +1,6 @@
 # IDMS Backend
 
-Backend для Integrated Diagram Management System (IDMS).
+Backend для Integrated Diagram Modeling System (IDMS).
 
 ## Структура проекта
 
