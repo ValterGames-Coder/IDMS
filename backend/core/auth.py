@@ -5,10 +5,8 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from database import get_db
-from models import User
-from schemas import TokenData
-from config import settings
+from core.database import get_db
+from core.config import settings
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
@@ -27,11 +25,12 @@ def get_password_hash(password):
     
     return pwd_context.hash(password)
 
-def get_user(db: Session, username: str):
+def get_user_by_username(db: Session, username: str):
+    from models.user import User
     return db.query(User).filter(User.username == username).first()
 
 def authenticate_user(db: Session, username: str, password: str):
-    user = get_user(db, username)
+    user = get_user_by_username(db, username)
     if not user:
         return False
     if not verify_password(password, user.hashed_password):
@@ -49,6 +48,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    from schemas.user import TokenData
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -62,7 +62,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
-    user = get_user(db, username=token_data.username)
+    user = get_user_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
     return user
+
