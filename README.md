@@ -8,8 +8,6 @@
 [![React](https://img.shields.io/badge/React-18.3+-blue.svg)](https://react.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[Возможности](#возможности) • [Технологии](#технологии) • [Установка](#установка) • [Использование](#использование) • [API](#api-документация)
-
 </div>
 
 ---
@@ -175,11 +173,3 @@ Frontend будет доступен по адресу: **http://localhost:5173*
 3. Настройте типы данных и ограничения (PK, FK, NOT NULL, UNIQUE)
 4. Создайте связи между сущностями
 5. Используйте контекстное меню (ПКМ) для дополнительных действий
-
-<div align="center">
-
-**[⬆ Наверх](#idms---integrated-diagram-modeling-system)**
-
-Сделано с ❤️ для сообщества
-
-</div>
